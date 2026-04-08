@@ -83,13 +83,17 @@ function parseProxyQuery(rawQuery) {
   return querystring.parse(rawQuery);
 }
 
-function verifyShopifyProxySignature(rawQuery, secret) {
-  if (!secret || !rawQuery) return false;
-  const params = parseProxyQuery(rawQuery);
-  const signature = params.signature;
-  if (!signature || typeof signature !== 'string') return false;
-  delete params.signature;
-  const sorted = Object.keys(params)
+function timingSafeEqualHex(expectedHex, providedHex) {
+  if (!expectedHex || !providedHex) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(expectedHex, 'hex'), Buffer.from(providedHex, 'hex'));
+  } catch {
+    return false;
+  }
+}
+
+function buildCanonicalProxyString(params) {
+  return Object.keys(params)
     .sort()
     .map((k) => {
       const v = params[k];
@@ -97,16 +101,34 @@ function verifyShopifyProxySignature(rawQuery, secret) {
       return `${k}=${val}`;
     })
     .join('');
-  const digest = crypto.createHmac('sha256', secret).update(sorted).digest('hex');
-  try {
-    return crypto.timingSafeEqual(Buffer.from(digest, 'hex'), Buffer.from(signature, 'hex'));
-  } catch {
-    return false;
+}
+
+function verifyShopifyProxySignature(rawQuery, secret) {
+  if (!secret || !rawQuery) return { valid: false, reason: 'missing_secret_or_query' };
+  const params = parseProxyQuery(rawQuery);
+
+  const signature = typeof params.signature === 'string' ? params.signature : '';
+  const hmac = typeof params.hmac === 'string' ? params.hmac : '';
+  if (!signature && !hmac) return { valid: false, reason: 'missing_signature_and_hmac' };
+
+  delete params.signature;
+  delete params.hmac;
+
+  const sorted = buildCanonicalProxyString(params);
+  const digestHex = crypto.createHmac('sha256', secret).update(sorted).digest('hex');
+
+  if (signature && timingSafeEqualHex(digestHex, signature)) {
+    return { valid: true, reason: 'signature_ok' };
   }
+  if (hmac && timingSafeEqualHex(digestHex, hmac)) {
+    return { valid: true, reason: 'hmac_ok' };
+  }
+  return { valid: false, reason: 'digest_mismatch' };
 }
 
 function verifyTimestamp(params) {
-  const ts = parseInt(params.timestamp, 10);
+  if (params.timestamp == null || params.timestamp === '') return true;
+  const ts = parseInt(String(params.timestamp), 10);
   if (Number.isNaN(ts)) return false;
   const now = Math.floor(Date.now() / 1000);
   return Math.abs(now - ts) <= 300;
@@ -119,7 +141,13 @@ function proxyAuthMiddleware(req, res, next) {
   }
   const q = req.url.includes('?') ? req.url.split('?')[1] : '';
   const params = parseProxyQuery(q);
-  if (!verifyShopifyProxySignature(q, SHOPIFY_CLIENT_SECRET) || !verifyTimestamp(params)) {
+  const signatureCheck = verifyShopifyProxySignature(q, SHOPIFY_CLIENT_SECRET);
+  const timestampOk = verifyTimestamp(params);
+  if (!signatureCheck.valid || !timestampOk) {
+    const queryKeys = Object.keys(params).sort().join(',');
+    console.warn(
+      `[proxy-auth] failed path=${req.path} shop=${params.shop || 'unknown'} reason=${signatureCheck.reason} timestamp_ok=${timestampOk} query_keys=${queryKeys}`,
+    );
     res.status(401).type('html').send('<p>Unauthorized</p>');
     return;
   }

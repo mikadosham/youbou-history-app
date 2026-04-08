@@ -54,6 +54,30 @@ const upload = multer({
 
 const app = express();
 
+app.get('/', (req, res) => {
+  const shop = typeof req.query?.shop === 'string' ? req.query.shop : '';
+  const shopDisplay = shop && /\.myshopify\.com$/.test(shop) ? shop : 'unknown';
+  res.type('html').send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Youbou History App</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 2rem; line-height: 1.5; }
+      code { background: #f6f6f7; border-radius: 4px; padding: 0.1rem 0.3rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Youbou History App</h1>
+    <p>The service is running and ready to receive app proxy submissions.</p>
+    <p>Shop context: <code>${shopDisplay}</code></p>
+    <p>Submit endpoint: <code>POST /proxy/submit</code> (Shopify app proxy)</p>
+    <p>Health check: <code>GET /healthz</code></p>
+  </body>
+</html>`);
+});
+
 function parseProxyQuery(rawQuery) {
   if (!rawQuery) return {};
   return querystring.parse(rawQuery);

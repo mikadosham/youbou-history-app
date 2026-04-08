@@ -1,0 +1,17 @@
+# Replace client_id after creating the app in Partner Dashboard or Dev Dashboard.
+# Run the Node server and expose it (e.g. cloudflare tunnel / ngrok), then set app_proxy.url to your public base + /proxy
+
+name = "youbou-history-submissions"
+handle = "youbou-history-submissions"
+client_id = "YOUR_CLIENT_ID"
+
+[access_scopes]
+scopes = "write_metaobjects,read_metaobjects,write_files,read_files"
+
+[auth]
+redirect_urls = [ "https://example.com/oauth" ]
+
+[app_proxy]
+url = "https://YOUR_PUBLIC_HOST/proxy"
+prefix = "apps"
+subpath = "youbou-history"

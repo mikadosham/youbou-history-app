@@ -1,0 +1,7 @@
+Seed the timeline in Shopify Admin → Content → Metaobjects → youbou_history_event.
+Use event_date = Jan 1 of each year; paste copy from https://youbouyca.com/pages/youbou-history
+
+Years with entries on the live site (add image + body for each):
+1913, 1925, 1926, 1928, 1929, 1930, 1931, 1933, 1935, 1937, 1938, 1939, 1940, 1942, 1943, 1944, 1945, 1946, 1947, 1948, 1949, 1950, 1951, 1952, 1954, 1955, 1956, 1957, 1958, 1974, 1984, 1985, 1988, 1994, 2000, 2001, 2007, 2008
+
+After entries exist, assign the page template "youbou-history" to your Then & Now page.

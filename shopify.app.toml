@@ -3,15 +3,15 @@
 
 name = "youbou-history-submissions"
 handle = "youbou-history-submissions"
-client_id = "YOUR_CLIENT_ID"
+client_id = "add0cce3245773006c9e3701001dbb8c"
 
 [access_scopes]
-scopes = "write_metaobjects,read_metaobjects,write_files,read_files"
+scopes = "write_metaobjects,read_metaobjects,write_files,read_files,write_app_proxy"
 
 [auth]
 redirect_urls = [ "https://example.com/oauth" ]
 
 [app_proxy]
-url = "https://YOUR_PUBLIC_HOST/proxy"
+url = "https://app.youbouyca.com/proxy"
 prefix = "apps"
 subpath = "youbou-history"

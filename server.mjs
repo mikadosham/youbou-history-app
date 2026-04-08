@@ -9,13 +9,43 @@ import multer from 'multer';
 import querystring from 'querystring';
 
 const PORT = Number(process.env.PORT || 8787);
-const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET || '';
-const SHOPIFY_ADMIN_ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || '';
-const API_VERSION = process.env.SHOPIFY_API_VERSION || '2025-01';
+const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '';
+const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET || '';
+const API_VERSION = process.env.SHOPIFY_API_VERSION || '2026-04';
 const METAOBJECT_TYPE = process.env.YOUBOU_METAOBJECT_TYPE || 'youbou_history_event';
 const REDIRECT_SUCCESS_URL = process.env.YOUBOU_SUCCESS_REDIRECT || '/pages/youbou-history?submitted=1';
 const MAX_BODY_BYTES = 10 * 1024;
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
+
+let cachedToken = null;
+let tokenExpiresAt = 0;
+
+async function getAccessToken(shop) {
+  if (cachedToken && Date.now() < tokenExpiresAt - 60_000) return cachedToken;
+
+  const response = await fetch(
+    `https://${shop}/admin/oauth/access_token`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: SHOPIFY_CLIENT_ID,
+        client_secret: SHOPIFY_CLIENT_SECRET,
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Token request failed (${response.status}): ${text}`);
+  }
+
+  const { access_token, expires_in } = await response.json();
+  cachedToken = access_token;
+  tokenExpiresAt = Date.now() + expires_in * 1000;
+  return cachedToken;
+}
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -59,14 +89,13 @@ function verifyTimestamp(params) {
 }
 
 function proxyAuthMiddleware(req, res, next) {
-  const secret = SHOPIFY_API_SECRET;
-  if (!secret) {
-    res.status(500).type('html').send('<p>Server misconfiguration: missing SHOPIFY_API_SECRET</p>');
+  if (!SHOPIFY_CLIENT_SECRET) {
+    res.status(500).type('html').send('<p>Server misconfiguration: missing SHOPIFY_CLIENT_SECRET</p>');
     return;
   }
   const q = req.url.includes('?') ? req.url.split('?')[1] : '';
   const params = parseProxyQuery(q);
-  if (!verifyShopifyProxySignature(q, secret) || !verifyTimestamp(params)) {
+  if (!verifyShopifyProxySignature(q, SHOPIFY_CLIENT_SECRET) || !verifyTimestamp(params)) {
     res.status(401).type('html').send('<p>Unauthorized</p>');
     return;
   }
@@ -75,12 +104,13 @@ function proxyAuthMiddleware(req, res, next) {
 }
 
 async function adminGraphql(shop, query, variables) {
+  const accessToken = await getAccessToken(shop);
   const url = `https://${shop}/admin/api/${API_VERSION}/graphql.json`;
   const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Shopify-Access-Token': SHOPIFY_ADMIN_ACCESS_TOKEN,
+      'X-Shopify-Access-Token': accessToken,
     },
     body: JSON.stringify({ query, variables }),
   });
@@ -201,8 +231,8 @@ const submitMiddleware = [proxyAuthMiddleware, upload.single('image')];
 
 async function handleSubmit(req, res) {
     try {
-      if (!SHOPIFY_ADMIN_ACCESS_TOKEN) {
-        res.status(500).type('html').send('<p>Server misconfiguration: missing SHOPIFY_ADMIN_ACCESS_TOKEN</p>');
+      if (!SHOPIFY_CLIENT_ID || !SHOPIFY_CLIENT_SECRET) {
+        res.status(500).type('html').send('<p>Server misconfiguration: missing SHOPIFY_CLIENT_ID or SHOPIFY_CLIENT_SECRET</p>');
         return;
       }
 

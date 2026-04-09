@@ -8,9 +8,12 @@ Forwards `POST /apps/youbou-history/submit` from the storefront to this server, 
 
 2. **Custom app** (Admin → Settings → Apps → Develop apps): enable Admin API scopes `write_metaobjects`, `read_metaobjects`, `write_files`, `read_files`. Install and copy the **Admin API access token**.
 
-3. **App proxy**: In the same app, set proxy URL to your deployed server (must include path prefix used below, e.g. `https://api.example.com/proxy`). Subpath `youbou-history`, prefix `apps`. Copy the app **Client secret** (used as `SHOPIFY_API_SECRET` for HMAC).
+3. **App proxy**: In the same app, set proxy URL to your deployed server (must include path prefix used below, e.g. `https://api.example.com/proxy`). Subpath `youbou-history`, prefix `apps`. Copy the app **Client secret** (used as `SHOPIFY_CLIENT_SECRET` for HMAC).
 
-4. **Environment**: copy `.env.example` to `.env` and fill values.
+4. **Environment**: copy `.env.example` to `.env` and fill values.  
+   - Preferred: set `SHOPIFY_ADMIN_ACCESS_TOKEN` (long-lived token for Admin GraphQL calls).  
+   - Required for proxy HMAC verification: `SHOPIFY_CLIENT_SECRET`.  
+   - Optional fallback token flow: `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET`.
 
 5. **Run**: `npm install && npm start` (or deploy behind HTTPS).
 
@@ -23,4 +26,4 @@ Expose port 8787 with a tunnel, set `app_proxy.url` in `shopify.app.toml` / Part
 ## Health
 
 - `GET /healthz` — no auth (for hosting checks).
-- `GET /apps/youbou-history/proxy/health` on the shop only works when called through the proxy with a valid `signature` query (use Shopify).
+- `GET /apps/youbou-history/health` on the shop only works when called through the proxy with a valid signature (use Shopify).

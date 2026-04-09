@@ -11,6 +11,7 @@ import querystring from 'querystring';
 const PORT = Number(process.env.PORT || 8787);
 const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '';
 const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET || '';
+const SHOPIFY_ADMIN_ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || '';
 const API_VERSION = process.env.SHOPIFY_API_VERSION || '2026-04';
 const METAOBJECT_TYPE = process.env.YOUBOU_METAOBJECT_TYPE || 'youbou_history_event';
 const REDIRECT_SUCCESS_URL = process.env.YOUBOU_SUCCESS_REDIRECT || '/pages/youbou-history?submitted=1';
@@ -21,6 +22,9 @@ let cachedToken = null;
 let tokenExpiresAt = 0;
 
 async function getAccessToken(shop) {
+  // Preferred for custom apps: use the long-lived Admin API access token directly.
+  if (SHOPIFY_ADMIN_ACCESS_TOKEN) return SHOPIFY_ADMIN_ACCESS_TOKEN;
+
   if (cachedToken && Date.now() < tokenExpiresAt - 60_000) return cachedToken;
 
   const response = await fetch(
@@ -283,8 +287,11 @@ const submitMiddleware = [proxyAuthMiddleware, upload.single('image')];
 
 async function handleSubmit(req, res) {
     try {
-      if (!SHOPIFY_CLIENT_ID || !SHOPIFY_CLIENT_SECRET) {
-        res.status(500).type('html').send('<p>Server misconfiguration: missing SHOPIFY_CLIENT_ID or SHOPIFY_CLIENT_SECRET</p>');
+      if (!SHOPIFY_ADMIN_ACCESS_TOKEN && (!SHOPIFY_CLIENT_ID || !SHOPIFY_CLIENT_SECRET)) {
+        res
+          .status(500)
+          .type('html')
+          .send('<p>Server misconfiguration: set SHOPIFY_ADMIN_ACCESS_TOKEN or both SHOPIFY_CLIENT_ID/SHOPIFY_CLIENT_SECRET</p>');
         return;
       }
 

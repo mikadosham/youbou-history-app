@@ -15,6 +15,8 @@ const SHOPIFY_ADMIN_ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || '';
 const API_VERSION = process.env.SHOPIFY_API_VERSION || '2026-04';
 const METAOBJECT_TYPE = process.env.YOUBOU_METAOBJECT_TYPE || 'youbou_history_event';
 const REDIRECT_SUCCESS_URL = process.env.YOUBOU_SUCCESS_REDIRECT || '/pages/youbou-history?submitted=1';
+const SHOPIFY_SCOPES = process.env.SHOPIFY_SCOPES || 'write_metaobjects,read_metaobjects,write_files,read_files';
+const SHOPIFY_APP_URL = process.env.SHOPIFY_APP_URL || '';
 const MAX_BODY_BYTES = 10 * 1024;
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
 
@@ -278,6 +280,84 @@ async function createDraftMetaobject(shop, fields) {
   }
   return data.metaobjectCreate.metaobject;
 }
+
+// One-shot OAuth install flow to capture an Admin API access token.
+// 1. In Partners → App setup, set Allowed redirection URL to `${SHOPIFY_APP_URL}/auth/callback`.
+// 2. Visit `${SHOPIFY_APP_URL}/auth?shop=your-store.myshopify.com` to install.
+// 3. The callback logs the access token to stdout — copy into .env as SHOPIFY_ADMIN_ACCESS_TOKEN.
+app.get('/auth', (req, res) => {
+  const shop = String(req.query?.shop || '');
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9-]*\.myshopify\.com$/.test(shop)) {
+    res.status(400).type('html').send('<p>Pass ?shop=your-store.myshopify.com</p>');
+    return;
+  }
+  if (!SHOPIFY_CLIENT_ID || !SHOPIFY_APP_URL) {
+    res.status(500).type('html').send('<p>Set SHOPIFY_CLIENT_ID and SHOPIFY_APP_URL in .env</p>');
+    return;
+  }
+  const state = crypto.randomBytes(16).toString('hex');
+  const redirectUri = `${SHOPIFY_APP_URL.replace(/\/$/, '')}/auth/callback`;
+  const installUrl =
+    `https://${shop}/admin/oauth/authorize?` +
+    new URLSearchParams({
+      client_id: SHOPIFY_CLIENT_ID,
+      scope: SHOPIFY_SCOPES,
+      redirect_uri: redirectUri,
+      state,
+    }).toString();
+  res.redirect(302, installUrl);
+});
+
+app.get('/auth/callback', async (req, res) => {
+  try {
+    const { shop, code, hmac, ...rest } = req.query || {};
+    if (typeof shop !== 'string' || typeof code !== 'string' || typeof hmac !== 'string') {
+      res.status(400).type('html').send('<p>Missing shop/code/hmac</p>');
+      return;
+    }
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9-]*\.myshopify\.com$/.test(shop)) {
+      res.status(400).type('html').send('<p>Invalid shop</p>');
+      return;
+    }
+    const params = { shop, code, ...rest };
+    const message = Object.keys(params)
+      .sort()
+      .map((k) => `${k}=${Array.isArray(params[k]) ? params[k].join(',') : params[k]}`)
+      .join('&');
+    const digest = crypto.createHmac('sha256', SHOPIFY_CLIENT_SECRET).update(message).digest('hex');
+    if (!timingSafeEqualHex(digest, hmac)) {
+      res.status(401).type('html').send('<p>HMAC mismatch</p>');
+      return;
+    }
+    const tokenRes = await fetch(`https://${shop}/admin/oauth/access_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: SHOPIFY_CLIENT_ID,
+        client_secret: SHOPIFY_CLIENT_SECRET,
+        code,
+      }),
+    });
+    const tokenJson = await tokenRes.json();
+    if (!tokenRes.ok || !tokenJson.access_token) {
+      console.error('[oauth] token exchange failed', tokenRes.status, tokenJson);
+      res.status(500).type('html').send('<p>Token exchange failed</p>');
+      return;
+    }
+    console.log('=================================================');
+    console.log(`[oauth] shop=${shop}`);
+    console.log(`[oauth] SHOPIFY_ADMIN_ACCESS_TOKEN=${tokenJson.access_token}`);
+    console.log(`[oauth] scope=${tokenJson.scope}`);
+    console.log('Copy the token above into your .env file.');
+    console.log('=================================================');
+    res
+      .type('html')
+      .send('<p>Install complete. Check the server logs for the access token, then paste it into <code>.env</code> as <code>SHOPIFY_ADMIN_ACCESS_TOKEN</code>.</p>');
+  } catch (e) {
+    console.error(e);
+    res.status(500).type('html').send('<p>OAuth callback error</p>');
+  }
+});
 
 app.get('/proxy/health', proxyAuthMiddleware, (req, res) => {
   res.type('html').send('<p>youbou-history-app proxy OK</p>');

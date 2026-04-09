@@ -4,12 +4,20 @@
 name = "youbou-history-submissions"
 handle = "youbou-history-submissions"
 client_id = "add0cce3245773006c9e3701001dbb8c"
+application_url = "https://app.youbouyca.com"
+embedded = true
+
+[webhooks]
+api_version = "2026-04"
 
 [access_scopes]
 scopes = "write_metaobjects,read_metaobjects,write_files,read_files,write_app_proxy"
 
+[access]
+use_legacy_install_flow = true
+
 [auth]
-redirect_urls = [ "https://example.com/oauth" ]
+redirect_urls = [ "https://app.youbouyca.com/auth/callback" ]
 
 [app_proxy]
 url = "https://app.youbouyca.com/proxy"

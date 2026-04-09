@@ -62,7 +62,62 @@ const app = express();
 
 app.get('/', (req, res) => {
   const shop = typeof req.query?.shop === 'string' ? req.query.shop : '';
-  const shopDisplay = shop && /\.myshopify\.com$/.test(shop) ? shop : 'unknown';
+  const host = typeof req.query?.host === 'string' ? req.query.host : '';
+  const shopValid = shop && /^[a-zA-Z0-9][a-zA-Z0-9-]*\.myshopify\.com$/.test(shop);
+
+  // Embedded admin context: serve App Bridge bootstrap that token-exchanges and logs the offline token.
+  if (shopValid && host && SHOPIFY_CLIENT_ID) {
+    res
+      .type('html')
+      .set('Content-Security-Policy', `frame-ancestors https://${shop} https://admin.shopify.com`)
+      .send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Youbou History App — Token Bootstrap</title>
+    <meta name="shopify-api-key" content="${SHOPIFY_CLIENT_ID}" />
+    <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 2rem; line-height: 1.5; }
+      pre { background: #f6f6f7; padding: 1rem; border-radius: 6px; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>Youbou History App</h1>
+    <p id="status">Requesting session token…</p>
+    <pre id="output"></pre>
+    <script>
+      (async () => {
+        const status = document.getElementById('status');
+        const output = document.getElementById('output');
+        try {
+          const token = await shopify.idToken();
+          status.textContent = 'Exchanging session token for offline access token…';
+          const res = await fetch('/token-exchange', {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ shop: ${JSON.stringify(shop)} }),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            status.textContent = 'Token exchange failed.';
+            output.textContent = JSON.stringify(data, null, 2);
+            return;
+          }
+          status.textContent = 'Done. Check Railway logs for SHOPIFY_ADMIN_ACCESS_TOKEN, paste it into your env vars.';
+          output.textContent = 'scope: ' + (data.scope || '(unknown)');
+        } catch (e) {
+          status.textContent = 'Error: ' + (e && e.message ? e.message : String(e));
+        }
+      })();
+    </script>
+  </body>
+</html>`);
+    return;
+  }
+
+  // Non-embedded fallback (e.g. visited directly).
   res.type('html').send(`<!doctype html>
 <html lang="en">
   <head>
@@ -77,11 +132,53 @@ app.get('/', (req, res) => {
   <body>
     <h1>Youbou History App</h1>
     <p>The service is running and ready to receive app proxy submissions.</p>
-    <p>Shop context: <code>${shopDisplay}</code></p>
+    <p>Shop context: <code>${shopValid ? shop : 'unknown'}</code></p>
     <p>Submit endpoint: <code>POST /proxy/submit</code> (Shopify app proxy)</p>
     <p>Health check: <code>GET /healthz</code></p>
   </body>
 </html>`);
+});
+
+app.post('/token-exchange', express.json(), async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const sessionToken = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+    const shop = typeof req.body?.shop === 'string' ? req.body.shop : '';
+    if (!sessionToken) return res.status(401).json({ error: 'missing_session_token' });
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9-]*\.myshopify\.com$/.test(shop)) {
+      return res.status(400).json({ error: 'invalid_shop' });
+    }
+    if (!SHOPIFY_CLIENT_ID || !SHOPIFY_CLIENT_SECRET) {
+      return res.status(500).json({ error: 'missing_client_credentials' });
+    }
+    const tokenRes = await fetch(`https://${shop}/admin/oauth/access_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+      body: new URLSearchParams({
+        client_id: SHOPIFY_CLIENT_ID,
+        client_secret: SHOPIFY_CLIENT_SECRET,
+        grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
+        subject_token: sessionToken,
+        subject_token_type: 'urn:ietf:params:oauth:token-type:id_token',
+        requested_token_type: 'urn:shopify:params:oauth:token-type:offline-access-token',
+      }),
+    });
+    const data = await tokenRes.json();
+    if (!tokenRes.ok || !data.access_token) {
+      console.error('[token-exchange] failed', tokenRes.status, data);
+      return res.status(500).json({ error: 'exchange_failed', details: data });
+    }
+    console.log('=================================================');
+    console.log(`[token-exchange] shop=${shop}`);
+    console.log(`[token-exchange] SHOPIFY_ADMIN_ACCESS_TOKEN=${data.access_token}`);
+    console.log(`[token-exchange] scope=${data.scope}`);
+    console.log('Copy the token above into your Railway env as SHOPIFY_ADMIN_ACCESS_TOKEN.');
+    console.log('=================================================');
+    return res.json({ ok: true, scope: data.scope });
+  } catch (e) {
+    console.error('[token-exchange] error', e);
+    return res.status(500).json({ error: 'internal', message: String(e?.message || e) });
+  }
 });
 
 function parseProxyQuery(rawQuery) {

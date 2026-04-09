@@ -501,7 +501,14 @@ async function handleSubmit(req, res) {
       }
 
       const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : mime === 'image/gif' ? 'gif' : 'jpg';
-      const filename = `youbou-history-${Date.now()}.${ext}`;
+      const slug = title
+        .toLowerCase()
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80) || 'untitled';
+      const filename = `youbou_history-${slug}.${ext}`;
 
       const imageGid = await uploadImageToShopify(shop, req.file.buffer, filename, mime);
 

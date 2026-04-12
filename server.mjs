@@ -548,6 +548,93 @@ async function handleSubmit(req, res) {
 app.post('/proxy/submit', ...submitMiddleware, handleSubmit);
 app.post('/submit', ...submitMiddleware, handleSubmit);
 
+const addImageMiddleware = [proxyAuthMiddleware, upload.single('image')];
+
+async function handleAddImage(req, res) {
+  try {
+    if (!SHOPIFY_ADMIN_ACCESS_TOKEN && (!SHOPIFY_CLIENT_ID || !SHOPIFY_CLIENT_SECRET)) {
+      res.status(500).type('html').send('<p>Server misconfiguration</p>');
+      return;
+    }
+
+    const shop = req.proxyShop;
+    if (!shop || !/\.myshopify\.com$/.test(shop)) {
+      res.status(400).type('html').send('<p>Invalid shop</p>');
+      return;
+    }
+
+    const handle = String(req.body?.handle || '').trim();
+    if (!handle) {
+      res.status(400).type('html').send('<p>Missing handle</p>');
+      return;
+    }
+
+    if (!req.file) {
+      res.status(400).type('html').send('<p>Missing image</p>');
+      return;
+    }
+
+    const allowed = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+    const mime = req.file.mimetype || 'application/octet-stream';
+    if (!allowed.has(mime)) {
+      res.status(400).type('html').send('<p>Unsupported image type</p>');
+      return;
+    }
+
+    const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : mime === 'image/gif' ? 'gif' : 'jpg';
+    const filename = `youbou_history-${handle}.${ext}`;
+
+    const imageGid = await uploadImageToShopify(shop, req.file.buffer, filename, mime);
+
+    // Look up metaobject by handle.
+    const lookupData = await adminGraphql(
+      shop,
+      `query($type: String!, $handle: String!) {
+        metaobjectByHandle(handle: { type: $type, handle: $handle }) {
+          id
+        }
+      }`,
+      { type: METAOBJECT_TYPE, handle },
+    );
+
+    const metaId = lookupData?.metaobjectByHandle?.id;
+    if (!metaId) {
+      res.status(404).type('html').send('<p>Entry not found</p>');
+      return;
+    }
+
+    // Update metaobject with image.
+    const updateData = await adminGraphql(
+      shop,
+      `mutation metaobjectUpdate($id: ID!, $metaobject: MetaobjectUpdateInput!) {
+        metaobjectUpdate(id: $id, metaobject: $metaobject) {
+          metaobject { id }
+          userErrors { field message }
+        }
+      }`,
+      {
+        id: metaId,
+        metaobject: {
+          fields: [{ key: 'image', value: imageGid }],
+        },
+      },
+    );
+
+    const errs = updateData?.metaobjectUpdate?.userErrors;
+    if (errs?.length) {
+      throw new Error(errs.map((e) => e.message).join('; '));
+    }
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[add-image]', e);
+    res.status(500).type('html').send('<p>Could not add image</p>');
+  }
+}
+
+app.post('/proxy/add-image', ...addImageMiddleware, handleAddImage);
+app.post('/add-image', ...addImageMiddleware, handleAddImage);
+
 app.get('/healthz', (_req, res) => {
   res.json({ ok: true });
 });
